@@ -3,13 +3,13 @@
     "description": "An Unleash client for Laravel",
     "type": "library",
     "require": {
-	"php": "^8.1",
+	"php": "^8.1|8.2|8.3",
         "ext-json": "*",
         "guzzlehttp/guzzle": "^6.3|^7.0",
-        "illuminate/support": "^5.8|^6|^7|^8|^9|^10",
-        "illuminate/config": "^5.8|^6|^7|^8|^9|^10",
-        "illuminate/http": "^5.8|^6|^7|^8|^9|^10",
-        "illuminate/contracts": "^5.8|^6|^7|^8|^9|^10",
+        "illuminate/support": "^5.8|^6|^7|^8|^9|^10|^11",
+        "illuminate/config": "^5.8|^6|^7|^8|^9|^10|^11",
+        "illuminate/http": "^5.8|^6|^7|^8|^9|^10|^11",
+        "illuminate/contracts": "^5.8|^6|^7|^8|^9|^10|^11",
         "lastguest/murmurhash": "^2.1"
     },
     "require-dev": {
