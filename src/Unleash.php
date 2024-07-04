@@ -23,6 +23,7 @@ class Unleash
     protected $config;
     protected $request;
     protected $features;
+    protected $expires;
 
     public function __construct(ClientInterface $client, Cache $cache, Config $config, Request $request)
     {
@@ -34,13 +35,17 @@ class Unleash
 
     public function getFeatures(): array
     {
+        if ($this->isFresh()) {
+            return $this->features;
+        }
+
         try {
-            $features = $this->getCachedFeatures();
+            $this->features = $this->getCachedFeatures();
 
             // Always store the failover cache, in case it is turned on during failure scenarios.
-            $this->cache->forever('unleash.features.failover', $features);
+            $this->cache->forever('unleash.features.failover', $this->features);
 
-            return $features;
+            return $this->features;
         } catch (TransferException | JsonException $e) {
             if ($this->config->get('unleash.cache.failover') === true) {
                 return $this->cache->get('unleash.features.failover', []);
@@ -110,6 +115,11 @@ class Unleash
         return !$this->isFeatureEnabled($name, ...$args);
     }
 
+    protected function isFresh(): bool
+    {
+        return $this->expires > time();
+    }
+
     protected function getCachedFeatures(): array
     {
         if (!$this->config->get('unleash.isEnabled')) {
@@ -117,9 +127,11 @@ class Unleash
         }
 
         if ($this->config->get('unleash.cache.isEnabled')) {
+            $this->setExpires();
+
             return $this->cache->remember(
                 'unleash',
-                $this->config->get('unleash.cache.ttl', self::DEFAULT_CACHE_TTL),
+                $this->getCacheTTL(),
                 function () {
                     return $this->fetchFeatures();
                 }
@@ -127,6 +139,16 @@ class Unleash
         }
 
         return $this->features ?? $this->features = $this->fetchFeatures();
+    }
+
+    protected function getCacheTTL(): int
+    {
+        return $this->config->get('unleash.cache.ttl', self::DEFAULT_CACHE_TTL);
+    }
+
+    protected function setExpires(): void
+    {
+        $this->expires = $this->getCacheTTL() + time();
     }
 
     protected function fetchFeatures(): array
@@ -138,6 +160,8 @@ class Unleash
         } catch (InvalidArgumentException $e) {
             throw new JsonException('Could not decode unleash response body.', $e->getCode(), $e);
         }
+
+        $this->setExpires();
 
         return $this->formatResponse($data);
     }
