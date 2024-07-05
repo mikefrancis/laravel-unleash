@@ -2,7 +2,6 @@
 
 namespace MikeFrancis\LaravelUnleash;
 
-use GuzzleHttp\Client;
 use GuzzleHttp\Exception\TransferException;
 use Illuminate\Contracts\Cache\Repository as Cache;
 use Illuminate\Contracts\Config\Repository as Config;
