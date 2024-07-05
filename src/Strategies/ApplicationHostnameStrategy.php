@@ -4,7 +4,6 @@ namespace MikeFrancis\LaravelUnleash\Strategies;
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Str;
 use MikeFrancis\LaravelUnleash\Strategies\Contracts\Strategy;
 
 class ApplicationHostnameStrategy implements Strategy

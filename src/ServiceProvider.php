@@ -4,8 +4,6 @@ namespace MikeFrancis\LaravelUnleash;
 
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\ServiceProvider as IlluminateServiceProvider;
-use MikeFrancis\LaravelUnleash\Unleash;
-use MikeFrancis\LaravelUnleash\Client;
 use GuzzleHttp\ClientInterface;
 
 class ServiceProvider extends IlluminateServiceProvider
@@ -42,6 +40,7 @@ class ServiceProvider extends IlluminateServiceProvider
             function (string $feature) {
                 $client = app(Client::class);
                 $unleash = app(Unleash::class, ['client' => $client]);
+                assert($unleash instanceof Unleash);
 
                 return $unleash->isFeatureEnabled($feature);
             }
@@ -52,6 +51,7 @@ class ServiceProvider extends IlluminateServiceProvider
             function (string $feature) {
                 $client = app(Client::class);
                 $unleash = app(Unleash::class, ['client' => $client]);
+                assert($unleash instanceof Unleash);
 
                 return !$unleash->isFeatureEnabled($feature);
             }
@@ -60,8 +60,6 @@ class ServiceProvider extends IlluminateServiceProvider
 
     /**
      * Get the path to the config.
-     *
-     * @return string
      */
     private function getConfigPath(): string
     {

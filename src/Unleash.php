@@ -2,18 +2,15 @@
 
 namespace MikeFrancis\LaravelUnleash;
 
-use GuzzleHttp\ClientInterface;
-use GuzzleHttp\Exception\InvalidArgumentException;
+use GuzzleHttp\Client;
 use GuzzleHttp\Exception\TransferException;
 use Illuminate\Contracts\Cache\Repository as Cache;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use JsonException;
 use MikeFrancis\LaravelUnleash\Strategies\Contracts\DynamicStrategy;
 use MikeFrancis\LaravelUnleash\Strategies\Contracts\Strategy;
-use Symfony\Component\HttpFoundation\Exception\JsonException;
-
-use function GuzzleHttp\json_decode;
 
 class Unleash
 {
@@ -26,7 +23,7 @@ class Unleash
     protected $features;
     protected $expires;
 
-    public function __construct(ClientInterface $client, Cache $cache, Config $config, Request $request)
+    public function __construct(Client $client, Cache $cache, Config $config, Request $request)
     {
         $this->client = $client;
         $this->cache = $cache;
@@ -109,7 +106,7 @@ class Unleash
 
             $params = Arr::get($strategyData, 'parameters', []);
 
-            if ($strategy->isEnabled($params, $this->request, ...$args)) {
+            if ($strategy->isEnabled($params, $this->request, ...$args)) { // @phan-suppress-current-line PhanParamTooManyUnpack
                 return true;
             }
         }
@@ -124,7 +121,9 @@ class Unleash
 
     public function refreshCache()
     {
-        $this->fetchFeatures();
+        if ($this->config->get('unleash.isEnabled') && $this->config->get('unleash.cache.isEnabled')) {
+            $this->fetchFeatures();
+        }
     }
 
     protected function isFresh(): bool
@@ -156,11 +155,7 @@ class Unleash
     {
         $response = $this->client->get($this->config->get('unleash.featuresEndpoint'));
 
-        try {
-            $data = json_decode((string)$response->getBody(), true, 512, \JSON_BIGINT_AS_STRING);
-        } catch (InvalidArgumentException $e) {
-            throw new JsonException('Could not decode unleash response body.', $e->getCode(), $e);
-        }
+        $data = (array) json_decode((string)$response->getBody(), true, 512, JSON_BIGINT_AS_STRING + JSON_THROW_ON_ERROR);
 
         $data['expires'] = $this->setExpires();
 
