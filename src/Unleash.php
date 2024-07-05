@@ -12,11 +12,12 @@ use Illuminate\Support\Arr;
 use MikeFrancis\LaravelUnleash\Strategies\Contracts\DynamicStrategy;
 use MikeFrancis\LaravelUnleash\Strategies\Contracts\Strategy;
 use Symfony\Component\HttpFoundation\Exception\JsonException;
+
 use function GuzzleHttp\json_decode;
 
 class Unleash
 {
-    const DEFAULT_CACHE_TTL = 15;
+    public const DEFAULT_CACHE_TTL = 15;
 
     protected $client;
     protected $cache;
@@ -39,20 +40,26 @@ class Unleash
             return $this->features;
         }
 
+        if (!$this->config->get('unleash.isEnabled')) {
+            return [];
+        }
+
         try {
-            $this->features = $this->getCachedFeatures();
-
-            // Always store the failover cache, in case it is turned on during failure scenarios.
-            $this->cache->forever('unleash.features.failover', $this->features);
-
-            return $this->features;
-        } catch (TransferException | JsonException $e) {
+            if ($this->config->get('unleash.cache.isEnabled')) {
+                $data = $this->getCachedFeatures();
+            } else {
+                $data = $this->fetchFeatures();
+            }
+        } catch (TransferException | JsonException) {
             if ($this->config->get('unleash.cache.failover') === true) {
-                return $this->cache->get('unleash.features.failover', []);
+                $data = $this->cache->get('unleash.failover', []);
             }
         }
 
-        return [];
+        $this->features = Arr::get($data, 'features', []);
+        $this->expires = Arr::get($data, 'expires', $this->getExpires());
+
+        return $this->features;
     }
 
     public function getFeature(string $name)
@@ -93,7 +100,7 @@ class Unleash
             if (is_callable($allStrategies[$className])) {
                 $strategy = $allStrategies[$className]();
             } else {
-                $strategy = new $allStrategies[$className];
+                $strategy = new $allStrategies[$className]();
             }
 
             if (!$strategy instanceof Strategy && !$strategy instanceof DynamicStrategy) {
@@ -115,6 +122,11 @@ class Unleash
         return !$this->isFeatureEnabled($name, ...$args);
     }
 
+    public function refreshCache()
+    {
+        $this->fetchFeatures();
+    }
+
     protected function isFresh(): bool
     {
         return $this->expires > time();
@@ -122,33 +134,22 @@ class Unleash
 
     protected function getCachedFeatures(): array
     {
-        if (!$this->config->get('unleash.isEnabled')) {
-            return [];
-        }
-
-        if ($this->config->get('unleash.cache.isEnabled')) {
-            $this->setExpires();
-
-            return $this->cache->remember(
-                'unleash',
-                $this->getCacheTTL(),
-                function () {
-                    return $this->fetchFeatures();
-                }
-            );
-        }
-
-        return $this->features ?? $this->features = $this->fetchFeatures();
+        return $this->cache->get('unleash.cache', function () {return $this->fetchFeatures();});
     }
 
-    protected function getCacheTTL(): int
+    public function getCacheTTL(): int
     {
         return $this->config->get('unleash.cache.ttl', self::DEFAULT_CACHE_TTL);
     }
 
-    protected function setExpires(): void
+    protected function setExpires(): int
     {
-        $this->expires = $this->getCacheTTL() + time();
+        return $this->expires = $this->getCacheTTL() + time();
+    }
+
+    public function getExpires(): int
+    {
+        return $this->expires ?? $this->setExpires();
     }
 
     protected function fetchFeatures(): array
@@ -161,13 +162,13 @@ class Unleash
             throw new JsonException('Could not decode unleash response body.', $e->getCode(), $e);
         }
 
-        $this->setExpires();
+        $data['expires'] = $this->setExpires();
 
-        return $this->formatResponse($data);
-    }
+        $this->cache->set('unleash.cache', $data, $this->getCacheTTL());
+        $this->cache->forever('unleash.failover', $data);
 
-    protected function formatResponse($data): array
-    {
-        return Arr::get($data, 'features', []);
+        $this->features = Arr::get($data, 'features', []);
+
+        return $data;
     }
 }
