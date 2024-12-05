@@ -17,7 +17,7 @@ class RefreshFeatures
 
     public function terminate()
     {
-        $unleash = app('unleash');
+        $unleash = app(Unleash::class);
         if (!$unleash instanceof Unleash) {
             return;
         }
