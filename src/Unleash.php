@@ -58,11 +58,11 @@ class Unleash
         return $this->features;
     }
 
-    public function getFeature(string $name)
+    public function getFeature(string $name): array
     {
         $features = $this->getFeatures();
 
-        return Arr::first(
+        return (array) Arr::first(
             $features,
             function (array $unleashFeature) use ($name) {
                 return $name === $unleashFeature['name'];
