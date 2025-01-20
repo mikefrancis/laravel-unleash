@@ -2,29 +2,27 @@
 
 namespace MikeFrancis\LaravelUnleash;
 
-use GuzzleHttp\ClientInterface;
-use GuzzleHttp\Exception\InvalidArgumentException;
 use GuzzleHttp\Exception\TransferException;
 use Illuminate\Contracts\Cache\Repository as Cache;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use JsonException;
 use MikeFrancis\LaravelUnleash\Strategies\Contracts\DynamicStrategy;
 use MikeFrancis\LaravelUnleash\Strategies\Contracts\Strategy;
-use Symfony\Component\HttpFoundation\Exception\JsonException;
-use function GuzzleHttp\json_decode;
 
 class Unleash
 {
-    const DEFAULT_CACHE_TTL = 15;
+    public const DEFAULT_CACHE_TTL = 15;
 
     protected $client;
     protected $cache;
     protected $config;
     protected $request;
     protected $features;
+    protected $expires;
 
-    public function __construct(ClientInterface $client, Cache $cache, Config $config, Request $request)
+    public function __construct(Client $client, Cache $cache, Config $config, Request $request)
     {
         $this->client = $client;
         $this->cache = $cache;
@@ -34,27 +32,37 @@ class Unleash
 
     public function getFeatures(): array
     {
+        if ($this->isFresh()) {
+            return $this->features;
+        }
+
+        if (!$this->config->get('unleash.isEnabled')) {
+            return [];
+        }
+
         try {
-            $features = $this->getCachedFeatures();
-
-            // Always store the failover cache, in case it is turned on during failure scenarios.
-            $this->cache->forever('unleash.features.failover', $features);
-
-            return $features;
-        } catch (TransferException | JsonException $e) {
+            if ($this->config->get('unleash.cache.isEnabled')) {
+                $data = $this->getCachedFeatures();
+            } else {
+                $data = $this->fetchFeatures();
+            }
+        } catch (TransferException | JsonException) {
             if ($this->config->get('unleash.cache.failover') === true) {
-                return $this->cache->get('unleash.features.failover', []);
+                $data = $this->cache->get('unleash.failover', []);
             }
         }
 
-        return [];
+        $this->features = Arr::get($data, 'features', []);
+        $this->expires = Arr::get($data, 'expires', $this->getExpires());
+
+        return $this->features;
     }
 
-    public function getFeature(string $name)
+    public function getFeature(string $name): array
     {
         $features = $this->getFeatures();
 
-        return Arr::first(
+        return (array) Arr::first(
             $features,
             function (array $unleashFeature) use ($name) {
                 return $name === $unleashFeature['name'];
@@ -88,7 +96,7 @@ class Unleash
             if (is_callable($allStrategies[$className])) {
                 $strategy = $allStrategies[$className]();
             } else {
-                $strategy = new $allStrategies[$className];
+                $strategy = new $allStrategies[$className]();
             }
 
             if (!$strategy instanceof Strategy && !$strategy instanceof DynamicStrategy) {
@@ -97,7 +105,7 @@ class Unleash
 
             $params = Arr::get($strategyData, 'parameters', []);
 
-            if ($strategy->isEnabled($params, $this->request, ...$args)) {
+            if ($strategy->isEnabled($params, $this->request, ...$args)) { // @phan-suppress-current-line PhanParamTooManyUnpack
                 return true;
             }
         }
@@ -110,40 +118,51 @@ class Unleash
         return !$this->isFeatureEnabled($name, ...$args);
     }
 
+    public function refreshCache()
+    {
+        if ($this->config->get('unleash.isEnabled') && $this->config->get('unleash.cache.isEnabled')) {
+            $this->fetchFeatures();
+        }
+    }
+
+    protected function isFresh(): bool
+    {
+        return $this->expires > time();
+    }
+
     protected function getCachedFeatures(): array
     {
-        if (!$this->config->get('unleash.isEnabled')) {
-            return [];
-        }
+        return $this->cache->get('unleash.cache', function () {return $this->fetchFeatures();});
+    }
 
-        if ($this->config->get('unleash.cache.isEnabled')) {
-            return $this->cache->remember(
-                'unleash',
-                $this->config->get('unleash.cache.ttl', self::DEFAULT_CACHE_TTL),
-                function () {
-                    return $this->fetchFeatures();
-                }
-            );
-        }
+    public function getCacheTTL(): int
+    {
+        return $this->config->get('unleash.cache.ttl', self::DEFAULT_CACHE_TTL);
+    }
 
-        return $this->features ?? $this->features = $this->fetchFeatures();
+    protected function setExpires(): int
+    {
+        return $this->expires = $this->getCacheTTL() + time();
+    }
+
+    public function getExpires(): int
+    {
+        return $this->expires ?? $this->setExpires();
     }
 
     protected function fetchFeatures(): array
     {
         $response = $this->client->get($this->config->get('unleash.featuresEndpoint'));
 
-        try {
-            $data = json_decode((string)$response->getBody(), true, 512, \JSON_BIGINT_AS_STRING);
-        } catch (InvalidArgumentException $e) {
-            throw new JsonException('Could not decode unleash response body.', $e->getCode(), $e);
-        }
+        $data = (array) json_decode((string)$response->getBody(), true, 512, JSON_BIGINT_AS_STRING + JSON_THROW_ON_ERROR);
 
-        return $this->formatResponse($data);
-    }
+        $data['expires'] = $this->setExpires();
 
-    protected function formatResponse($data): array
-    {
-        return Arr::get($data, 'features', []);
+        $this->cache->set('unleash.cache', $data, $this->getCacheTTL());
+        $this->cache->forever('unleash.failover', $data);
+
+        $this->features = Arr::get($data, 'features', []);
+
+        return $data;
     }
 }

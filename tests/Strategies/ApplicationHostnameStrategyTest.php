@@ -8,7 +8,6 @@ use PHPUnit\Framework\TestCase;
 
 class ApplicationHostnameStrategyTest extends TestCase
 {
-
     public function testWithSingleApplicationHostname()
     {
         $params = [
